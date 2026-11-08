@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: tela infinita a tutto schermo, barra flottante in alto (tavola + apri/recenti), info al tocco in basso. Look scuro fisso, come PureRef. */
+/* Layout: tela infinita a tutto schermo, barra flottante in alto, info/azioni al tocco in basso. Look scuro fisso, come PureRef. */
 :root {
   --canvas: #1d1e21;
   --chip: rgba(38, 40, 45, 0.88);
@@ -24,6 +24,7 @@
   --ink: #e9e7e2;
   --ink-dim: #9a9ca3;
   --accent: #ffd64d;   /* il giallo delle note di PureRef */
+  --danger: #ff8a7a;
   --ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: dark;
@@ -37,10 +38,12 @@ body {
 }
 #stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
 #stage.dragging { cursor: grabbing; }
+#stage.dropping { outline: 3px dashed var(--accent); outline-offset: -10px; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .item { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
 .item img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; pointer-events: none; -webkit-user-drag: none; }
 .hit { position: absolute; }
+.item.selected .hit:last-child { outline: var(--selw, 3px) solid var(--accent); }
 .note { position: absolute; white-space: pre; line-height: 1.2; font-family: Arial, var(--ui); pointer-events: none; }
 .item svg { position: absolute; overflow: visible; left: 0; top: 0; pointer-events: none; }
 .group-frame { position: absolute; border-radius: 6px; pointer-events: none; }
@@ -54,21 +57,24 @@ body {
   pointer-events: none;
 }
 .chip {
-  pointer-events: auto; display: flex; align-items: center; gap: 10px;
+  pointer-events: auto; display: flex; align-items: center; gap: 8px;
   background: var(--chip); border: 1px solid var(--chip-line); border-radius: 10px;
   padding: 7px 8px 7px 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  min-width: 0;
+  min-width: 0; flex-wrap: wrap;
 }
-.title { font-weight: 600; font-size: 15px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.title { font-weight: 600; font-size: 15px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
 .meta { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 button, .filebtn {
   font: 500 13px var(--ui); color: var(--ink); background: transparent;
   border: 1px solid var(--chip-line); border-radius: 7px; padding: 6px 10px; cursor: pointer;
-  white-space: nowrap; display: inline-flex; align-items: center;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;
 }
 .filebtn.primary { background: var(--accent); color: #1d1e21; border-color: var(--accent); font-weight: 600; }
 button:hover, .filebtn:hover { border-color: rgba(255,255,255,0.22); }
 button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+#saveBtn.dirty { border-color: var(--accent); color: var(--accent); }
+#saveBtn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: none; }
+#saveBtn.dirty .dot { display: inline-block; }
 #file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 #zoom { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -76,7 +82,7 @@ button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); 
   position: fixed; z-index: 6;
   top: calc(58px + env(safe-area-inset-top, 0px));
   left: max(16px, env(safe-area-inset-left, 0px));
-  width: min(340px, calc(100% - 32px));
+  width: min(360px, calc(100% - 32px));
   background: var(--menu); border: 1px solid var(--chip-line); border-radius: 10px;
   padding: 6px; display: grid; gap: 2px; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
 }
@@ -85,29 +91,30 @@ button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); 
 #recent .open:hover { background: rgba(255,255,255,0.05); }
 #recent .open span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #recent .when { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
-#recent .del { border: 0; color: var(--ink-dim); padding: 8px 10px; }
+#recent .del, #recent .ref { border: 0; color: var(--ink-dim); padding: 8px 10px; }
+#recent .ref { font-size: 15px; }
+#recent .ref:hover, #recent .del:hover { color: var(--ink); }
+#recent .head { padding: 6px 10px 4px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+#recent .row.current .open span:first-child { color: var(--accent); }
 #recent .empty { padding: 10px; color: var(--ink-dim); font-size: 13px; line-height: 1.45; }
 
 #info {
   position: fixed; z-index: 5;
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   left: max(16px, env(safe-area-inset-left, 0px));
-  max-width: min(560px, calc(100% - 32px));
-  font-size: 13px; color: var(--ink-dim); padding-right: 12px;
+  max-width: min(620px, calc(100% - 32px));
+  font-size: 13px; color: var(--ink-dim); padding-right: 8px; flex-wrap: nowrap;
 }
 #info a { color: var(--accent); word-break: break-all; text-decoration: none; }
 #info .k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
-#recent .ref { border: 0; color: var(--ink-dim); padding: 8px 10px; font-size: 15px; }
-#recent .ref:hover, #recent .del:hover { color: var(--ink); }
-#recent .head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px 4px; }
-#recent .head span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
-#recent .row.current .open span:first-child { color: var(--accent); }
+#info .actions { display: flex; gap: 6px; flex-shrink: 0; }
+#info .danger { color: var(--danger); }
 #toast {
   position: fixed; z-index: 7; left: 50%; transform: translateX(-50%);
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  top: calc(64px + env(safe-area-inset-top, 0px));
   background: var(--menu); border: 1px solid var(--chip-line); border-radius: 10px;
   padding: 9px 14px; font-size: 13px; max-width: calc(100% - 32px); text-align: center;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4); line-height: 1.4;
 }
 /* modalità pulita: solo le immagini, un puntino discreto per uscire */
 body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { display: none !important; }
@@ -121,22 +128,24 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
 }
 #exitClean:hover { color: var(--ink); background: var(--chip); }
 #msg { position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink-dim); font-size: 14px; padding: 16px; text-align: center; pointer-events: none; }
-@media (max-width: 560px) { .meta, #zoom { display: none; } }
+@media (max-width: 760px) { .meta, #zoom { display: none; } }
 </style>
 </head>
 <body>
 
 <div id="stage"><div id="world"></div></div>
-<div id="msg">Carico la tavola…</div>
+<div id="msg">Tocca "Apri .pur" e scegli una tavola da Google Drive.</div>
 
 <div class="bar">
   <div class="chip">
-    <span class="title" id="title">—</span><span class="meta" id="count"></span>
+    <span class="title" id="title">Tavole</span><span class="meta" id="count"></span>
     <label class="filebtn primary" for="file">Apri .pur<input id="file" type="file"></label>
     <button id="refreshBtn" type="button" hidden>Aggiorna</button>
     <button id="recentBtn" type="button" aria-expanded="false">Recenti</button>
   </div>
   <div class="chip">
+    <button id="pasteBtn" type="button" hidden>Incolla</button>
+    <button id="saveBtn" type="button" hidden><span class="dot"></span>Salva su Drive</button>
     <span id="zoom">100%</span>
     <button id="fit" type="button">Adatta</button>
     <button id="cleanBtn" type="button" title="Mostra solo le immagini">Pulita</button>
@@ -150,21 +159,69 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
 <script src="sql-asm.js"></script>
 <script>
 (() => {
-  const stage = document.getElementById('stage');
-  const world = document.getElementById('world');
-  const zoomEl = document.getElementById('zoom');
-  const info = document.getElementById('info');
-  const msg = document.getElementById('msg');
-  const recentEl = document.getElementById('recent');
-  const recentBtn = document.getElementById('recentBtn');
+  const $ = id => document.getElementById(id);
+  const stage = $('stage'), world = $('world'), zoomEl = $('zoom'), info = $('info'), msg = $('msg');
+  const recentEl = $('recent'), recentBtn = $('recentBtn'), refreshBtn = $('refreshBtn');
+  const pasteBtn = $('pasteBtn'), saveBtn = $('saveBtn'), fileInput = $('file'), toastEl = $('toast');
+  const te = new TextEncoder();
 
-  /* ================= lettura del .pur (PureRef 2.x) =================
-     Un .pur di PureRef 2 è un database SQLite i cui primi N byte sono stati
-     spostati in fondo al file e sostituiti da intestazione + miniatura.
-     I valori Qt (QTransform, QPainterPath…) sono QByteArray salvati in colonne
-     TEXT: ogni carattere corrisponde a un byte. */
+  let toastTimer = null;
+  function toast(text, ms = 3800) {
+    toastEl.textContent = text; toastEl.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, ms);
+  }
+  const fmtDate = t => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const label = n => n.replace(/\.pur$/i, '');
 
-  const MAGIC = new TextEncoder().encode('SQLite format 3\0');
+  /* ================= MD5 (impronta del file e checksum delle immagini) ================= */
+  const md5 = (() => {
+    const K = new Uint32Array(64), S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+    for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+    return bytes => {
+      const n = bytes.length, total = ((n + 8) >>> 6) + 1 << 6;
+      const buf = new Uint8Array(total); buf.set(bytes); buf[n] = 0x80;
+      const dvb = new DataView(buf.buffer);
+      dvb.setUint32(total - 8, (n * 8) >>> 0, true); dvb.setUint32(total - 4, Math.floor(n / 0x20000000), true);
+      let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+      const M = new Uint32Array(16);
+      for (let off = 0; off < total; off += 64) {
+        for (let i = 0; i < 16; i++) M[i] = dvb.getUint32(off + i * 4, true);
+        let A = a0, B = b0, C = c0, D = d0;
+        for (let i = 0; i < 64; i++) {
+          let F, g;
+          if (i < 16) { F = (B & C) | (~B & D); g = i; }
+          else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+          else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+          else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+          F = (F + A + K[i] + M[g]) >>> 0;
+          A = D; D = C; C = B; B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) >>> 0;
+        }
+        a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+      }
+      const out = new DataView(new ArrayBuffer(16));
+      [a0, b0, c0, d0].forEach((v, i) => out.setUint32(i * 4, v, true));
+      return [...new Uint8Array(out.buffer)].map(x => x.toString(16).padStart(2, '0')).join('');
+    };
+  })();
+
+  /* ================= formato .pur (PureRef 2.x) =================
+     [intestazione: QString versione, u32, u64 lunghezza db, QString versione, QString md5]
+     [u32 + miniatura JPEG]   <- fin qui sono N byte
+     [database SQLite, con i suoi primi N byte spostati in fondo]
+     L'md5 è calcolato su tutto ciò che segue il campo md5. */
+  function header(u8) {
+    const d = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let o = 0;
+    o += 4 + d.getUint32(o);            // versione formato
+    o += 4;                              // u32
+    const dbLenOff = o; o += 8;          // u64 lunghezza database
+    o += 4 + d.getUint32(o);            // versione app
+    const hashLen = d.getUint32(o), hashOff = o + 4; o += 4 + hashLen;
+    const hashed = o;
+    const thumbLen = d.getUint32(o);
+    return { dbLenOff, hashOff, hashLen, hashed, N: o + 4 + thumbLen };
+  }
+  const MAGIC = te.encode('SQLite format 3\0');
   function lastIndexOf(buf, pat) {
     outer: for (let i = buf.length - pat.length; i >= 0; i--) {
       for (let j = 0; j < pat.length; j++) if (buf[i + j] !== pat[j]) continue outer;
@@ -175,20 +232,32 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
   function extractDb(u8) {
     const tail = lastIndexOf(u8, MAGIC);
     if (tail < 0) throw new Error('Questo file non sembra un .pur di PureRef 2. I file della versione 1.x hanno un formato diverso: aprilo e risalvalo con PureRef 2.');
-    const n = u8.length - tail;
-    const db = new Uint8Array(tail);
-    db.set(u8.subarray(tail), 0);
-    db.set(u8.subarray(n, tail), n);
+    const n = u8.length - tail, db = new Uint8Array(tail);
+    db.set(u8.subarray(tail), 0); db.set(u8.subarray(n, tail), n);
     return db;
   }
+  function buildPur(orig, dbBytes) {
+    const h = header(orig);
+    const out = new Uint8Array(h.N + dbBytes.length);
+    out.set(orig.subarray(0, h.N), 0);                              // intestazione + miniatura
+    new DataView(out.buffer).setBigUint64(h.dbLenOff, BigInt(dbBytes.length));
+    out.set(dbBytes.subarray(h.N), h.N);                            // database dal byte N in poi
+    out.set(dbBytes.subarray(0, h.N), out.length - h.N);            // i primi N byte in fondo
+    const hex = md5(out.subarray(h.hashed));
+    const dv = new DataView(out.buffer);
+    for (let i = 0; i < hex.length && i * 2 < h.hashLen; i++) dv.setUint16(h.hashOff + i * 2, hex.charCodeAt(i));
+    return out;
+  }
+
+  // I valori Qt sono QByteArray in colonne TEXT: un carattere = un byte.
   function raw(v) {
     if (v == null) return null;
-    let str = v;
-    if (v instanceof Uint8Array) str = new TextDecoder('utf-8').decode(v);
+    const str = v instanceof Uint8Array ? new TextDecoder('utf-8').decode(v) : v;
     const out = new Uint8Array(str.length);
     for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 0xff;
     return out;
   }
+  const toText = bytes => { let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return s; };
   const dv = b => new DataView(b.buffer, b.byteOffset, b.byteLength);
   function qtransform(v) {
     const b = raw(v);
@@ -197,7 +266,29 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
     for (let i = 0; i < 9; i++) m.push(d.getFloat64(5 + i * 8));
     return [m[0], m[1], m[3], m[4], m[6], m[7]];
   }
-  function findAscii(b, s) { return lastIndexOf(b, new TextEncoder().encode(s)); }
+  function qtransformBytes(m) {
+    const b = new Uint8Array(77), d = dv(b);
+    d.setUint32(0, 0x50); b[4] = 0;
+    [m[0], m[1], 0, m[2], m[3], 0, m[4], m[5], 1].forEach((x, i) => d.setFloat64(5 + i * 8, x));
+    return b;
+  }
+  function boundsBytes(w, h) {
+    const name = te.encode('QPainterPath\0');
+    const b = new Uint8Array(22 + 4 + 5 * 20 + 8), d = dv(b);
+    d.setUint32(0, 0x400); b[4] = 0; d.setUint32(5, name.length); b.set(name, 9);
+    d.setUint32(22, 5);
+    [[0, -w/2, -h/2], [1, w/2, -h/2], [1, w/2, h/2], [1, -w/2, h/2], [1, -w/2, -h/2]].forEach(([t, x, y], i) => {
+      const o = 26 + i * 20; d.setInt32(o, t); d.setFloat64(o + 4, x); d.setFloat64(o + 12, y);
+    });
+    return b;
+  }
+  const SORT_TEMPLATE = (() => {   // QVariant BigRational come lo scrive PureRef 2.1.3
+    const hex = '000004000000000000000c426967526174696f6e616c000000000100000000000000010000000100000001000000000000000100000001';
+    return new Uint8Array(hex.match(/../g).map(h => parseInt(h, 16)));
+  })();
+  const SORT_IDX = 33;
+
+  function findAscii(b, s) { return lastIndexOf(b, te.encode(s)); }
   function readPath(b, off) {
     const d = dv(b), n = d.getUint32(off); off += 4;
     const els = [];
@@ -258,40 +349,39 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
   }
 
   let SQLp = null;
-  function sql() {
-    if (!SQLp) SQLp = typeof initSqlJs === 'function' ? initSqlJs() : Promise.reject(new Error('Il motore SQLite non si è caricato. Controlla la connessione e riapri la pagina.'));
-    return SQLp;
-  }
-  let liveUrls = [];
-  async function parsePur(buf, name) {
-    const SQL = await sql();
-    const db = new SQL.Database(extractDb(new Uint8Array(buf)));
-    const rows = q => { const r = db.exec(q)[0]; return r ? r.values.map(v => Object.fromEntries(r.columns.map((c, i) => [c, v[i]]))) : []; };
-    const has = t => rows(`select name from sqlite_master where type='table' and name='${t}'`).length > 0;
-    const byId = (t, cols) => has(t) ? new Map(rows(`select ${cols} from ${t}`).map(r => [r.id, r])) : new Map();
-    // i campi Qt contengono byte nulli: vanno letti come BLOB, altrimenti sql.js tronca la stringa
-    const B = c => `cast(${c} as blob) as ${c}`;
+  const sql = () => (SQLp ||= (typeof initSqlJs === 'function' ? initSqlJs() : Promise.reject(new Error('Il lettore dei file non si è caricato. Chiudi e riapri l\'app.'))));
 
-    liveUrls.forEach(URL.revokeObjectURL); liveUrls = [];
+  /* La tavola aperta: database tenuto aperto per poterci aggiungere immagini. */
+  let cur = null;   // { db, name, orig (Uint8Array del .pur), dirty, edited }
+  const rowsOf = (db, q, params) => {
+    const st = db.prepare(q); if (params) st.bind(params);
+    const out = []; while (st.step()) out.push(st.getAsObject()); st.free(); return out;
+  };
+  const B = c => `cast(${c} as blob) as ${c}`;
+  let liveUrls = [];
+  function readBoard(db, title) {
+    const has = t => rowsOf(db, `select name from sqlite_master where type='table' and name=?`, [t]).length > 0;
+    const byId = (t, cols) => has(t) ? new Map(rowsOf(db, `select ${cols} from ${t}`).map(r => [r.id, r])) : new Map();
+    const oldUrls = liveUrls; liveUrls = [];
     const images = new Map();
-    for (const r of rows('select id, format, origin, source, width, height, data from images')) {
+    for (const r of rowsOf(db, 'select id, format, origin, source, width, height, data from images')) {
       const fmt = String(r.format || 'png').toLowerCase();
       const url = URL.createObjectURL(new Blob([r.data], { type: fmt.startsWith('jp') ? 'image/jpeg' : 'image/' + fmt }));
       liveUrls.push(url);
       images.set(r.id, { file: url, w: r.width, h: r.height, source: r.origin || r.source });
     }
+    setTimeout(() => oldUrls.forEach(URL.revokeObjectURL), 2000);
     const imgs = byId('items_images', `id, image, ${B('image_transform')}, ${B('image_bounds')}`);
     const notes = byId('items_notes', `id, text, ${B('background_color')}`);
     const draws = byId('items_drawings', `id, ${B('strokes')}`);
     const groups = byId('items_groups', `id, ${B('background_color')}`);
-    const items = rows(`select id, parent, z, opacity, ${B('transform')} from items order by z`).map(r => {
+    const items = rowsOf(db, `select id, parent, z, opacity, ${B('transform')} from items order by z`).map(r => {
       const it = { id: r.id, parent: r.parent, z: r.z, opacity: r.opacity ?? 1, matrix: qtransform(r.transform) };
       if (imgs.has(r.id)) {
         const ii = imgs.get(r.id);
-        Object.assign(it, { type: 'image', image: images.get(ii.image), imageMatrix: qtransform(ii.image_transform), crop: cropOf(ii.image_bounds) });
+        Object.assign(it, { type: 'image', image: images.get(ii.image), imageId: ii.image, imageMatrix: qtransform(ii.image_transform), crop: cropOf(ii.image_bounds) });
       } else if (notes.has(r.id)) {
-        const n = notes.get(r.id);
-        Object.assign(it, { type: 'note', ...noteOf(n.text), background: colorOf(n.background_color) });
+        Object.assign(it, { type: 'note', ...noteOf(notes.get(r.id).text), background: colorOf(notes.get(r.id).background_color) });
       } else if (draws.has(r.id)) {
         Object.assign(it, { type: 'drawing', strokes: strokesOf(draws.get(r.id).strokes) });
       } else if (groups.has(r.id)) {
@@ -299,11 +389,207 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       } else it.type = 'unknown';
       return it;
     });
-    db.close();
-    return { title: name.replace(/\.pur$/i, ''), items };
+    return { title, items };
+  }
+  async function openPur(buf, name) {
+    const SQL = await sql();
+    const orig = new Uint8Array(buf);
+    const db = new SQL.Database(extractDb(orig));
+    if (cur && cur.db) try { cur.db.close(); } catch (e) {}
+    cur = { db, name, orig, dirty: false, edited: /_ipad\.pur$/i.test(name) };
+    return readBoard(db, label(name));
   }
 
-  /* ================= tavole recenti (solo su questo dispositivo) ================= */
+  /* ================= aggiunta di immagini ================= */
+  async function normalizeImage(blob) {
+    // PureRef salva PNG e JPG: gli altri formati (WebP, HEIC…) li converto in PNG
+    const bmp = await createImageBitmap(blob);
+    const w = bmp.width, h = bmp.height;
+    let type = blob.type;
+    if (type !== 'image/png' && type !== 'image/jpeg') {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      blob = await new Promise(r => c.toBlob(r, 'image/png')); type = 'image/png';
+    }
+    bmp.close && bmp.close();
+    return { data: new Uint8Array(await blob.arrayBuffer()), w, h, format: type === 'image/jpeg' ? 'JPG' : 'PNG' };
+  }
+  const screenToScene = (x, y) => [(x - tx) / s, (y - ty) / s];
+
+  async function addImage(blob, screenX, screenY, sourceUrl) {
+    if (!cur) { toast('Apri prima una tavola, poi aggiungi le immagini.'); return; }
+    let img;
+    try { img = await normalizeImage(blob); }
+    catch (e) { toast('Questo file non è un\'immagine che riesco a leggere.'); return; }
+    const db = cur.db;
+    const one = q => { const r = rowsOf(db, q)[0]; return r ? Object.values(r)[0] : null; };
+    const imgId = (one('select max(id) from images') ?? -1) + 1;
+    const itemId = (one('select max(id) from items') ?? -1) + 1;
+    const z = (one('select max(z) from items') ?? 0) + 1;
+    let sortMax = 0;
+    for (const r of rowsOf(db, `select ${B('sort_order')} from items`)) {
+      const b = raw(r.sort_order);
+      if (b && b.length >= SORT_IDX + 4) sortMax = Math.max(sortMax, dv(b).getUint32(SORT_IDX));
+    }
+    const so = SORT_TEMPLATE.slice(); dv(so).setUint32(SORT_IDX, sortMax + 1);
+    // dimensione iniziale: circa un terzo dello schermo
+    const k = Math.min((stage.clientWidth * 0.35) / s / img.w, (stage.clientHeight * 0.5) / s / img.h);
+    const [sx, sy] = screenToScene(screenX ?? stage.clientWidth / 2, screenY ?? stage.clientHeight / 2);
+    db.run('insert into images (id, source_type, origin, source, format, checksum, data, width, height) values (?,?,?,?,?,?,?,?,?)',
+      [imgId, 1, sourceUrl || null, sourceUrl || null, img.format, md5(img.data), img.data, img.w, img.h]);
+    db.run('insert into items (parent, id, name, transform, sort_order, z, opacity, locked, comment) values (?,?,?,?,?,?,?,?,?)',
+      [-1, itemId, sourceUrl ? sourceUrl.split('/').pop().replace(/\.[a-z]+$/i, '').slice(0, 80) : '', toText(qtransformBytes([k, 0, 0, k, sx, sy])), toText(so), z, 1.0, 0, null]);
+    db.run('insert into items_images (image, playback_speed, id, playback_state, image_transform, image_bounds, playback_frame, flags) values (?,?,?,?,?,?,?,?)',
+      [imgId, 1.0, itemId, 0, toText(qtransformBytes([1, 0, 0, 1, -img.w / 2, -img.h / 2])), toText(boundsBytes(img.w, img.h)), 0, 1]);
+    markEdited();
+    build(readBoard(db, label(cur.name)), true);
+    select(itemId);
+    toast('Immagine aggiunta. Trascinala per spostarla, due dita sopra per ridimensionarla.');
+  }
+
+  function markEdited() {
+    if (!cur.edited) {
+      cur.edited = true;
+      cur.name = label(cur.name).replace(/_ipad$/i, '') + '_ipad.pur';
+      $('title').textContent = label(cur.name);
+    }
+    cur.dirty = true;
+    saveBtn.classList.add('dirty'); saveBtn.hidden = false;
+    schedulePersist();
+  }
+
+  // Dopo ogni modifica preparo il file .pur e lo tengo nei Recenti: così "Salva" è immediato
+  // e se chiudi l'app le modifiche non si perdono.
+  let persistTimer = null, outFile = null;
+  function schedulePersist() { clearTimeout(persistTimer); outFile = null; persistTimer = setTimeout(persist, 600); }
+  async function persist() {
+    if (!cur) return null;
+    const dbBytes = cur.db.export();
+    const bytes = buildPur(cur.orig, dbBytes);
+    outFile = new File([bytes], cur.name, { type: 'application/octet-stream', lastModified: Date.now() });
+    await saveRecent(cur.name, bytes.buffer, Date.now(), { edited: true });
+    try { localStorage.setItem('pureref-last', cur.name); } catch (e) {}
+    window.__lastPur = bytes; // per i test
+    return outFile;
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    if (!cur) return;
+    if (!outFile) { clearTimeout(persistTimer); await persist(); }
+    const file = outFile;
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: label(file.name) });
+        cur.dirty = false; saveBtn.classList.remove('dirty');
+        toast('Se hai scelto "Salva in File" → Drive → Database_Pureref_iori, la trovi accanto all\'originale.', 6000);
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') { toast('Salvataggio annullato. Le modifiche restano nei Recenti.'); return; }
+    }
+    // alternativa: scarica il file
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    cur.dirty = false; saveBtn.classList.remove('dirty');
+    toast('File scaricato: spostalo nella cartella di Drive dall\'app File.', 6000);
+  });
+
+  // ---- Incolla (pulsante, o Cmd+V con tastiera) ----
+  pasteBtn.addEventListener('click', async () => {
+    if (!navigator.clipboard || !navigator.clipboard.read) { toast('Questo dispositivo non permette di incollare immagini qui.'); return; }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const t = it.types.find(x => x.startsWith('image/'));
+        if (t) return addImage(await it.getType(t));
+      }
+      for (const it of items) {
+        if (it.types.includes('text/plain')) {
+          const txt = (await (await it.getType('text/plain')).text()).trim();
+          if (/^https?:\/\//.test(txt)) return addFromUrl(txt);
+        }
+      }
+      toast('Negli appunti non c\'è un\'immagine. Su Pinterest tieni premuto sull\'immagine e scegli "Copia".');
+    } catch (e) {
+      toast('Non ho potuto leggere gli appunti. Tocca di nuovo "Incolla" e poi la bollina "Incolla" dell\'iPad.');
+    }
+  });
+  window.addEventListener('paste', e => {
+    const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/'));
+    if (f) { e.preventDefault(); addImage(f); }
+  });
+
+  async function addFromUrl(url, x, y) {
+    try {
+      const r = await fetch(url, { mode: 'cors' });
+      const b = await r.blob();
+      if (!b.type.startsWith('image/')) throw 0;
+      return addImage(b, x, y, url);
+    } catch (e) {
+      toast('Il sito non permette di prendere l\'immagine dal link. Trascina l\'immagine stessa, oppure tienila premuta e scegli "Copia".', 6000);
+    }
+  }
+
+  // ---- Trascina dentro (immagini da Pinterest/Safari/Foto, oppure un .pur) ----
+  let dragDepth = 0;
+  window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; stage.classList.add('dropping'); });
+  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; stage.classList.remove('dropping'); } });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', async e => {
+    e.preventDefault(); dragDepth = 0; stage.classList.remove('dropping');
+    const dt = e.dataTransfer, x = e.clientX, y = e.clientY;
+    const files = [...(dt.files || [])];
+    const pur = files.find(f => /\.pur$/i.test(f.name));
+    if (pur) return openFile(pur);
+    const imgs = files.filter(f => f.type.startsWith('image/'));
+    if (imgs.length) {
+      let src = (dt.getData('text/uri-list') || '').split('\n').find(l => /^https?:/.test(l)) || null;
+      for (let i = 0; i < imgs.length; i++) await addImage(imgs[i], x + i * 30, y + i * 30, i === 0 ? src : null);
+      return;
+    }
+    const html = dt.getData('text/html');
+    const m = html && html.match(/<img[^>]+src="([^"]+)"/i);
+    const url = (m && m[1]) || (dt.getData('text/uri-list') || dt.getData('text/plain') || '').trim().split('\n')[0];
+    if (/^https?:\/\//.test(url)) return addFromUrl(url, x, y);
+    if (url || html) toast('Non ho trovato un\'immagine in quello che hai trascinato.');
+  });
+
+  /* ================= selezione, spostamento, ridimensionamento ================= */
+  let selId = null;
+  const elById = new Map();
+  const editable = it => it && it.type === 'image' && (it.parent === -1 || it.parent == null);
+  function select(id) {
+    if (selId != null && elById.get(selId)) elById.get(selId).classList.remove('selected');
+    selId = id;
+    if (id != null && elById.get(id)) elById.get(id).classList.add('selected');
+    updateSelWidth();
+    showInfo(id != null ? itemsById.get(id) : null);
+  }
+  function updateSelWidth() {
+    const it = selId != null && itemsById.get(selId);
+    if (!it) return;
+    const k = Math.hypot(it.matrix[0], it.matrix[1]) || 1;
+    elById.get(selId)?.style.setProperty('--selw', (3 / (s * k)) + 'px');
+  }
+  function writeTransform(it) {
+    cur.db.run(`update items set transform = ? where id = ?`, [toText(qtransformBytes(it.matrix)), it.id]);
+    markEdited();
+  }
+  function deleteItem(it) {
+    const db = cur.db;
+    db.run('delete from items_images where id = ?', [it.id]);
+    db.run('delete from items where id = ?', [it.id]);
+    if (it.imageId != null && !rowsOf(db, 'select id from items_images where image = ?', [it.imageId]).length)
+      db.run('delete from images where id = ?', [it.imageId]);
+    selId = null; info.hidden = true;
+    markEdited();
+    build(readBoard(db, label(cur.name)), true);
+    toast('Immagine eliminata.');
+  }
+
+  /* ================= recenti (solo su questo dispositivo) ================= */
   const DB_NAME = 'pureref-viewer', STORE = 'boards';
   function idb() {
     return new Promise((res, rej) => {
@@ -322,11 +608,10 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error);
     });
   }
-  const saveRecent = (name, buf, modified) => store('readwrite', st => st.put({ name, buf, at: Date.now(), modified: modified || null })).catch(() => {});
+  const saveRecent = (name, buf, modified, extra) => store('readwrite', st => st.put({ name, buf, at: Date.now(), modified: modified || null, ...(extra || {}) })).catch(() => {});
   const listRecent = () => store('readonly', st => st.getAll()).then(a => (a || []).sort((x, y) => y.at - x.at)).catch(() => []);
   const getRecent = name => store('readonly', st => st.get(name)).catch(() => null);
   const delRecent = name => store('readwrite', st => st.delete(name)).catch(() => {});
-  const fmtDate = t => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   async function renderRecent() {
     const list = await listRecent();
@@ -337,24 +622,26 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       recentEl.appendChild(p); return;
     }
     const head = document.createElement('div'); head.className = 'head';
-    const hl = document.createElement('span'); hl.textContent = `Tavole recenti · ${list.length}`;
-    head.appendChild(hl); recentEl.appendChild(head);
+    head.textContent = `Tavole recenti · ${list.length}`; recentEl.appendChild(head);
     for (const r of list) {
-      const row = document.createElement('div'); row.className = 'row' + (r.name === current ? ' current' : '');
+      const row = document.createElement('div'); row.className = 'row' + (cur && r.name === cur.name ? ' current' : '');
       const b = document.createElement('button'); b.className = 'open'; b.type = 'button';
-      const t = document.createElement('span'); t.textContent = r.name.replace(/\.pur$/i, '');
+      const t = document.createElement('span'); t.textContent = label(r.name);
       const w = document.createElement('span'); w.className = 'when';
-      w.textContent = (r.modified ? 'salvata ' + fmtDate(r.modified) : 'caricata ' + fmtDate(r.at)) + ' · ' + (r.buf.byteLength / 1048576).toFixed(1) + ' MB';
+      w.textContent = (r.edited ? 'modificata su iPad ' : r.modified ? 'salvata ' : 'caricata ') + fmtDate(r.edited ? r.at : (r.modified || r.at)) + ' · ' + (r.buf.byteLength / 1048576).toFixed(1) + ' MB';
       b.append(t, w);
       b.addEventListener('click', () => { toggleRecent(false); openBuffer(r.buf, r.name, false); });
-      const u = document.createElement('button'); u.className = 'ref'; u.type = 'button'; u.textContent = '↻';
-      u.setAttribute('aria-label', 'Aggiorna ' + r.name + ' dal file');
-      u.title = 'Aggiorna dal file';
-      u.addEventListener('click', () => { toggleRecent(false); askRefresh(r.name); });
+      row.append(b);
+      if (!r.edited) {
+        const u = document.createElement('button'); u.className = 'ref'; u.type = 'button'; u.textContent = '↻';
+        u.setAttribute('aria-label', 'Aggiorna ' + r.name + ' dal file'); u.title = 'Aggiorna dal file';
+        u.addEventListener('click', () => { toggleRecent(false); askRefresh(r.name); });
+        row.append(u);
+      }
       const x = document.createElement('button'); x.className = 'del'; x.type = 'button'; x.textContent = '✕';
       x.setAttribute('aria-label', 'Togli ' + r.name + ' dai recenti');
       x.addEventListener('click', async () => { await delRecent(r.name); renderRecent(); });
-      row.append(b, u, x); recentEl.appendChild(row);
+      row.append(x); recentEl.appendChild(row);
     }
   }
   function toggleRecent(show) {
@@ -364,21 +651,16 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
   }
   recentBtn.addEventListener('click', () => toggleRecent());
 
-  let current = null, refreshTarget = null, toastTimer = null;
-  const fileInput = document.getElementById('file');
-  const refreshBtn = document.getElementById('refreshBtn');
-  const toastEl = document.getElementById('toast');
-  function toast(text) {
-    toastEl.textContent = text; toastEl.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3500);
-  }
-
+  /* ================= apertura e aggiornamento ================= */
+  let refreshTarget = null;
   async function openBuffer(buf, name, remember = true, modified = null) {
-    msg.hidden = false; msg.textContent = 'Leggo ' + name + '…';
+    msg.hidden = false; msg.textContent = 'Leggo ' + label(name) + '…';
     try {
-      const board = await parsePur(buf, name);
+      const board = await openPur(buf, name);
+      selId = null;
       build(board);
-      current = name; refreshBtn.hidden = false;
+      refreshBtn.hidden = cur.edited; pasteBtn.hidden = false;
+      saveBtn.hidden = !cur.edited; saveBtn.classList.remove('dirty');
       if (remember) saveRecent(name, buf, modified);
       try { localStorage.setItem('pureref-last', name); } catch (e) {}
       return true;
@@ -387,53 +669,44 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       return false;
     }
   }
-
-  // "Aggiorna": il browser non può rileggere da solo un file dell'app File,
-  // quindi riapre il selettore e sostituisce la copia salvata di quella tavola.
   function askRefresh(name) {
     refreshTarget = name;
-    toast('Scegli di nuovo ' + name.replace(/\.pur$/i, '') + ' da Google Drive');
+    toast('Scegli di nuovo ' + label(name) + ' da Google Drive');
     fileInput.click();
   }
-  refreshBtn.addEventListener('click', () => current && askRefresh(current));
+  refreshBtn.addEventListener('click', () => cur && askRefresh(cur.name));
 
-  fileInput.addEventListener('change', async e => {
-    const f = e.target.files && e.target.files[0]; e.target.value = '';
-    const target = refreshTarget; refreshTarget = null;
-    if (!f) return;
-    const label = f.name.replace(/\.pur$/i, '');
-    // stessa tavola già salvata: si aggiorna solo se il file ha una data più recente
+  async function openFile(f, target = null) {
     const old = await getRecent(f.name);
+    // si rilegge solo se il file è più recente della copia già salvata
     const newer = !old || !old.modified || f.lastModified > old.modified;
     if (!newer) {
-      if (current === f.name) toast(label + ' è già aggiornata (salvata ' + fmtDate(old.modified) + ')');
-      else if (await openBuffer(old.buf, old.name, false)) toast(label + ' è già aggiornata: aperta la copia salvata');
+      if (cur && cur.name === f.name) toast(label(f.name) + ' è già aggiornata (salvata ' + fmtDate(old.modified) + ')');
+      else if (await openBuffer(old.buf, old.name, false)) toast(label(f.name) + ' è già aggiornata: aperta la copia salvata');
       return;
     }
     const buf = await f.arrayBuffer();
     if (target && f.name !== target) {
-      if (await openBuffer(buf, f.name, true, f.lastModified)) toast('Hai scelto ' + label + ': aperta come tavola a parte');
+      if (await openBuffer(buf, f.name, true, f.lastModified)) toast('Hai scelto ' + label(f.name) + ': aperta come tavola a parte');
       return;
     }
-    if (await openBuffer(buf, f.name, true, f.lastModified) && old) {
-      toast('Aggiornata alla versione salvata ' + fmtDate(f.lastModified));
-    }
-  });
-  // trascina un .pur sulla pagina (desktop)
-  window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop', async e => {
-    e.preventDefault();
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) openBuffer(await f.arrayBuffer(), f.name, true, f.lastModified);
+    if (await openBuffer(buf, f.name, true, f.lastModified) && old) toast('Aggiornata alla versione salvata ' + fmtDate(f.lastModified));
+  }
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = '';
+    const target = refreshTarget; refreshTarget = null;
+    if (!f) return;
+    if (f.type.startsWith('image/')) return addImage(f);
+    openFile(f, target);
   });
 
   /* ================= disegno della tavola ================= */
   let s = 1, tx = 0, ty = 0, bounds = null, anim = null;
   let itemsById = new Map();
-
   function apply() {
     world.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
     zoomEl.textContent = Math.round(s * 100) + '%';
+    if (selId != null) updateSelWidth();
   }
   const mul = (m, n) => [
     n[0]*m[0] + n[1]*m[2],  n[0]*m[1] + n[1]*m[3],
@@ -467,13 +740,12 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
     return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
   }
 
-  function build(board) {
-    world.replaceChildren(); info.hidden = true;
+  function build(board, keepView = false) {
+    world.replaceChildren(); elById.clear();
+    if (!keepView) info.hidden = true;
     itemsById = new Map(board.items.map(it => [it.id, it]));
-    document.getElementById('title').textContent = board.title || 'Tavola';
-    const nImg = board.items.filter(i => i.type === 'image').length;
-    document.getElementById('count').textContent = `${nImg} immagini`;
-
+    $('title').textContent = board.title || 'Tavola';
+    $('count').textContent = `${board.items.filter(i => i.type === 'image').length} immagini`;
     const sorted = [...board.items].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     const groupBoxes = new Map();
@@ -484,7 +756,6 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       el.className = 'item ' + it.type;
       el.style.transform = css(sceneMatrix(it));
       if (it.opacity != null && it.opacity < 1) el.style.opacity = it.opacity;
-
       if (it.type === 'image' && it.image) {
         const clip = document.createElement('div');
         clip.className = 'hit';
@@ -519,8 +790,7 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
         }
         el.appendChild(svg);
       }
-      world.appendChild(el);
-
+      world.appendChild(el); elById.set(it.id, el);
       const b = sceneBox(it);
       if (b) {
         bx0 = Math.min(bx0, b[0]); by0 = Math.min(by0, b[1]);
@@ -538,25 +808,23 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
       const f = document.createElement('div');
       f.className = 'group-frame';
       Object.assign(f.style, {
-        left: (g[0]-pad)+'px', top: (g[1]-pad)+'px',
-        width: (g[2]-g[0]+2*pad)+'px', height: (g[3]-g[1]+2*pad)+'px',
-        background: grp.background || 'rgba(255,255,255,0.035)',
-        border: '1px solid rgba(255,255,255,0.08)'
+        left: (g[0]-pad)+'px', top: (g[1]-pad)+'px', width: (g[2]-g[0]+2*pad)+'px', height: (g[3]-g[1]+2*pad)+'px',
+        background: grp.background || 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.08)'
       });
       world.prepend(f);
     }
     bounds = isFinite(bx0) ? [bx0, by0, bx1, by1] : [0, 0, 1000, 1000];
     msg.hidden = true;
-    fitTo(bounds, false);
+    if (selId != null && elById.get(selId)) elById.get(selId).classList.add('selected');
+    if (!keepView) fitTo(bounds, false); else apply();
   }
 
   function fitTo(b, animate = true, margin = 0.06) {
     if (!b) return;
-    const W = stage.clientWidth, H = stage.clientHeight, topPad = 56;
+    const W = stage.clientWidth, H = stage.clientHeight, topPad = document.body.classList.contains('clean') ? 0 : 56;
     const w = Math.max(1, b[2]-b[0]), h = Math.max(1, b[3]-b[1]);
     const ns = Math.min(W / (w * (1 + 2*margin)), (H - topPad) / (h * (1 + 2*margin)));
-    const ntx = W/2 - (b[0] + w/2) * ns;
-    const nty = topPad + (H - topPad)/2 - (b[1] + h/2) * ns;
+    const ntx = W/2 - (b[0] + w/2) * ns, nty = topPad + (H - topPad)/2 - (b[1] + h/2) * ns;
     if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { s = ns; tx = ntx; ty = nty; apply(); return; }
     const s0 = s, tx0 = tx, ty0 = ty, t0 = performance.now(), D = 320;
     cancelAnimationFrame(anim);
@@ -572,15 +840,23 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
     tx = cx - (cx - tx) * f; ty = cy - (cy - ty) * f; s = ns; apply();
   }
 
-  /* ================= gesti ================= */
+  /* ================= gesti =================
+     un dito: sposta la vista (o l'immagine selezionata, se parti da lei)
+     due dita: zoom della vista (o ridimensiona l'immagine selezionata, se il gesto parte su di lei) */
   const pointers = new Map();
-  let pinch = null, moved = false, lastTap = 0, lastTapId = null;
+  let pinch = null, moved = false, lastTap = 0, lastTapId = null, editing = null;
+  const hitIdAt = (x, y) => { const h = document.elementsFromPoint(x, y).find(el => el.dataset && el.dataset.id); return h ? +h.dataset.id : null; };
+
   stage.addEventListener('pointerdown', e => {
     cancelAnimationFrame(anim);
     if (!recentEl.hidden) toggleRecent(false);
     stage.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
     moved = false;
+    if (pointers.size === 1) {
+      const id = hitIdAt(e.clientX, e.clientY);
+      editing = (id != null && id === selId && editable(itemsById.get(id))) ? { id } : null;
+    }
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x-b.x, a.y-b.y), cx: (a.x+b.x)/2, cy: (a.y+b.y)/2 };
@@ -592,12 +868,22 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
     const dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY;
     if (Math.hypot(p.x - p.x0, p.y - p.y0) > 6) moved = true;
-    if (pointers.size === 1) { tx += dx; ty += dy; apply(); }
-    else if (pointers.size === 2 && pinch) {
+    const it = editing && itemsById.get(editing.id);
+    if (pointers.size === 1) {
+      if (it) { it.matrix[4] += dx / s; it.matrix[5] += dy / s; editing.changed = true; elById.get(it.id).style.transform = css(it.matrix); }
+      else { tx += dx; ty += dy; apply(); }
+    } else if (pointers.size === 2 && pinch) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x-b.x, a.y-b.y), cx = (a.x+b.x)/2, cy = (a.y+b.y)/2;
-      tx += cx - pinch.cx; ty += cy - pinch.cy;
-      zoomAt(d / pinch.d, cx, cy);
+      if (it) {
+        const f = d / pinch.d, m = it.matrix;
+        m[0] *= f; m[1] *= f; m[2] *= f; m[3] *= f;
+        m[4] += (cx - pinch.cx) / s; m[5] += (cy - pinch.cy) / s;
+        editing.changed = true; elById.get(it.id).style.transform = css(m); updateSelWidth();
+      } else {
+        tx += cx - pinch.cx; ty += cy - pinch.cy;
+        zoomAt(d / pinch.d, cx, cy);
+      }
       pinch = { d, cx, cy };
     }
   });
@@ -605,18 +891,21 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
     const p = pointers.get(e.pointerId);
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinch = null;
-    if (pointers.size === 0) stage.classList.remove('dragging');
-    if (!p || moved || e.type === 'pointercancel') return;
-    const hit = document.elementsFromPoint(e.clientX, e.clientY).find(el => el.dataset && el.dataset.id);
-    const id = hit ? hit.dataset.id : null;
+    if (pointers.size === 0) {
+      stage.classList.remove('dragging');
+      if (editing && editing.changed) writeTransform(itemsById.get(editing.id));
+      editing = null;
+    }
+    if (!p || moved || e.type === 'pointercancel' || pointers.size > 0) return;
+    const id = hitIdAt(e.clientX, e.clientY);
     const now = performance.now();
     if (now - lastTap < 320 && id === lastTapId) {
       lastTap = 0;
-      if (id) fitTo(sceneBox(itemsById.get(+id)), true, 0.03); else fitTo(bounds);
+      if (id != null) fitTo(sceneBox(itemsById.get(id)), true, 0.03); else fitTo(bounds);
       return;
     }
     lastTap = now; lastTapId = id;
-    showInfo(id ? itemsById.get(+id) : null);
+    select(id);
   }
   stage.addEventListener('pointerup', end);
   stage.addEventListener('pointercancel', end);
@@ -628,61 +917,71 @@ body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { displ
   }, { passive: false });
   let gs = 1;
   stage.addEventListener('gesturestart', e => { e.preventDefault(); gs = 1; });
-  stage.addEventListener('gesturechange', e => { e.preventDefault(); zoomAt(e.scale / gs, e.clientX, e.clientY); gs = e.scale; });
-  document.getElementById('fit').addEventListener('click', () => fitTo(bounds));
+  stage.addEventListener('gesturechange', e => { e.preventDefault(); if (!editing) zoomAt(e.scale / gs, e.clientX, e.clientY); gs = e.scale; });
+  $('fit').addEventListener('click', () => fitTo(bounds));
+  window.addEventListener('resize', () => bounds && fitTo(bounds, false));
 
   // modalità pulita: nasconde barra, info e menu; resta solo un puntino in alto a destra per uscire
-  const exitClean = document.getElementById('exitClean');
+  const exitClean = $('exitClean');
   function setClean(on) {
     document.body.classList.toggle('clean', on);
     exitClean.hidden = !on;
     if (on) { info.hidden = true; toggleRecent(false); }
     try { localStorage.setItem('pureref-clean', on ? '1' : '0'); } catch (e) {}
   }
-  document.getElementById('cleanBtn').addEventListener('click', () => setClean(true));
+  $('cleanBtn').addEventListener('click', () => setClean(true));
   exitClean.addEventListener('click', () => setClean(false));
   try { if (localStorage.getItem('pureref-clean') === '1') setClean(true); } catch (e) {}
-  window.addEventListener('resize', () => bounds && fitTo(bounds, false));
+
   window.addEventListener('keydown', e => {
     if (e.key === '0' || e.key === 'Home') fitTo(bounds);
     if (e.key === '+' || e.key === '=') zoomAt(1.25, innerWidth/2, innerHeight/2);
     if (e.key === '-') zoomAt(0.8, innerWidth/2, innerHeight/2);
-    if (e.key === 'Escape') { toggleRecent(false); if (document.body.classList.contains('clean')) setClean(false); }
+    if (e.key === 'Escape') { toggleRecent(false); select(null); if (document.body.classList.contains('clean')) setClean(false); }
     if (e.key === 'h' || e.key === 'H') setClean(!document.body.classList.contains('clean'));
+    if ((e.key === 'Backspace' || e.key === 'Delete') && selId != null && editable(itemsById.get(selId))) deleteItem(itemsById.get(selId));
   });
 
   function showInfo(it) {
     if (!it || !it.image || document.body.classList.contains('clean')) { info.hidden = true; return; }
     info.replaceChildren();
     const box = document.createElement('div');
-    box.style.display = 'grid'; box.style.gap = '3px'; box.style.minWidth = '0';
+    box.style.display = 'grid'; box.style.gap = '3px'; box.style.minWidth = '0'; box.style.flex = '1';
     const k = document.createElement('span'); k.className = 'k';
-    k.textContent = `${it.image.w} × ${it.image.h} px · doppio tocco per ingrandire`;
+    k.textContent = `${it.image.w} × ${it.image.h} px · ` + (editable(it) ? 'trascina per spostare · due dita per ridimensionare' : 'doppio tocco per ingrandire');
     box.appendChild(k);
     const src = it.image.source;
     if (src && /^https?:/.test(src)) {
       const a = document.createElement('a'); a.href = src; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = src.length > 90 ? src.slice(0, 87) + '…' : src;
+      a.textContent = src.length > 80 ? src.slice(0, 77) + '…' : src;
       box.appendChild(a);
     } else {
       const t = document.createElement('span');
       t.textContent = src ? src.split(/[\\/]/).pop() : 'Immagine incollata, senza sorgente';
       box.appendChild(t);
     }
-    info.appendChild(box); info.hidden = false;
+    info.appendChild(box);
+    if (editable(it)) {
+      const acts = document.createElement('div'); acts.className = 'actions';
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'danger'; del.textContent = 'Elimina';
+      del.addEventListener('click', () => deleteItem(it));
+      acts.appendChild(del); info.appendChild(acts);
+    }
+    info.hidden = false;
   }
 
-  /* ================= avvio: ultima tavola aperta, altrimenti l'esempio ================= */
+  /* ================= avvio: ultima tavola aperta ================= */
   (async () => {
     let last = null;
     try { last = localStorage.getItem('pureref-last'); } catch (e) {}
     const rec = last ? await getRecent(last) : null;
-    if (rec) return openBuffer(rec.buf, rec.name, false);
-    msg.textContent = 'Tocca "Apri .pur" e scegli una tavola da Google Drive.';
+    if (rec) {
+      await openBuffer(rec.buf, rec.name, false);
+      if (rec.edited && cur) { cur.edited = true; saveBtn.hidden = false; refreshBtn.hidden = true; }
+    }
   })();
 })();
 </script>
-
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
 </body>
 </html>
