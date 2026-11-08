@@ -1,5 +1,5 @@
 // Tiene l'app disponibile anche offline. Cambia VERSION quando aggiorni i file.
-const VERSION = 'tavole-v1';
+const VERSION = 'tavole-v2';
 const FILES = ['./', 'index.html', 'sql-asm.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
