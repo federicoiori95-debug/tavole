@@ -109,6 +109,17 @@ button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); 
   padding: 9px 14px; font-size: 13px; max-width: calc(100% - 32px); text-align: center;
   box-shadow: 0 8px 30px rgba(0,0,0,0.4);
 }
+/* modalità pulita: solo le immagini, un puntino discreto per uscire */
+body.clean .bar, body.clean #info, body.clean #recent, body.clean #toast { display: none !important; }
+#exitClean {
+  position: fixed; z-index: 8;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  right: max(10px, env(safe-area-inset-right, 0px));
+  width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  background: rgba(38, 40, 45, 0.35); border: 1px solid rgba(255,255,255,0.06);
+  color: rgba(233, 231, 226, 0.45); font-size: 15px; justify-content: center;
+}
+#exitClean:hover { color: var(--ink); background: var(--chip); }
 #msg { position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink-dim); font-size: 14px; padding: 16px; text-align: center; pointer-events: none; }
 @media (max-width: 560px) { .meta, #zoom { display: none; } }
 </style>
@@ -128,11 +139,13 @@ button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); 
   <div class="chip">
     <span id="zoom">100%</span>
     <button id="fit" type="button">Adatta</button>
+    <button id="cleanBtn" type="button" title="Mostra solo le immagini">Pulita</button>
   </div>
 </div>
 <div id="recent" hidden></div>
 <div id="info" class="chip" hidden></div>
 <div id="toast" role="status" hidden></div>
+<button id="exitClean" type="button" aria-label="Esci dalla modalità pulita" title="Mostra i comandi" hidden>◐</button>
 
 <script src="sql-asm.js"></script>
 <script>
@@ -617,16 +630,29 @@ button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); 
   stage.addEventListener('gesturestart', e => { e.preventDefault(); gs = 1; });
   stage.addEventListener('gesturechange', e => { e.preventDefault(); zoomAt(e.scale / gs, e.clientX, e.clientY); gs = e.scale; });
   document.getElementById('fit').addEventListener('click', () => fitTo(bounds));
+
+  // modalità pulita: nasconde barra, info e menu; resta solo un puntino in alto a destra per uscire
+  const exitClean = document.getElementById('exitClean');
+  function setClean(on) {
+    document.body.classList.toggle('clean', on);
+    exitClean.hidden = !on;
+    if (on) { info.hidden = true; toggleRecent(false); }
+    try { localStorage.setItem('pureref-clean', on ? '1' : '0'); } catch (e) {}
+  }
+  document.getElementById('cleanBtn').addEventListener('click', () => setClean(true));
+  exitClean.addEventListener('click', () => setClean(false));
+  try { if (localStorage.getItem('pureref-clean') === '1') setClean(true); } catch (e) {}
   window.addEventListener('resize', () => bounds && fitTo(bounds, false));
   window.addEventListener('keydown', e => {
     if (e.key === '0' || e.key === 'Home') fitTo(bounds);
     if (e.key === '+' || e.key === '=') zoomAt(1.25, innerWidth/2, innerHeight/2);
     if (e.key === '-') zoomAt(0.8, innerWidth/2, innerHeight/2);
-    if (e.key === 'Escape') toggleRecent(false);
+    if (e.key === 'Escape') { toggleRecent(false); if (document.body.classList.contains('clean')) setClean(false); }
+    if (e.key === 'h' || e.key === 'H') setClean(!document.body.classList.contains('clean'));
   });
 
   function showInfo(it) {
-    if (!it || !it.image) { info.hidden = true; return; }
+    if (!it || !it.image || document.body.classList.contains('clean')) { info.hidden = true; return; }
     info.replaceChildren();
     const box = document.createElement('div');
     box.style.display = 'grid'; box.style.gap = '3px'; box.style.minWidth = '0';
