@@ -1,0 +1,65 @@
+TAVOLE PUREREF — visualizzatore per iPad
+==========================================
+
+Cosa c'è in questa cartella
+  index.html            l'app
+  sql-asm.js            il lettore dei file .pur (SQLite), incluso per funzionare offline
+  sw.js                 tiene l'app disponibile anche senza connessione
+  manifest.webmanifest  nome e icona dell'app
+  icon-*.png            icone
+
+L'app va messa online una volta sola (gratis), poi si installa sull'iPad
+da Safari con "Aggiungi alla schermata Home".
+Le tue tavole e immagini NON vengono caricate online: restano solo sull'iPad.
+
+
+1) METTERLA ONLINE CON GITHUB PAGES (una volta sola, ~5 minuti)
+---------------------------------------------------------------
+  a. Vai su github.com ed entra (o crea un account gratuito).
+  b. In alto a destra "+" > "New repository".
+     Nome: tavole   ·   Public   ·   "Create repository".
+  c. Nella pagina del repository: "uploading an existing file".
+     Trascina TUTTI i file di questa cartella (non la cartella stessa)
+     e premi "Commit changes".
+  d. Settings > Pages. In "Branch" scegli "main" e "/ (root)", poi "Save".
+  e. Dopo 1-2 minuti l'indirizzo sarà:
+        https://TUO-NOME-UTENTE.github.io/tavole/
+
+  (Alternativa senza GitHub: app.netlify.com/drop e trascina la cartella;
+   serve un account gratuito per tenerla online.)
+
+
+2) INSTALLARLA SULL'IPAD
+------------------------
+  a. Apri l'indirizzo con SAFARI (non Chrome).
+  b. Tocca il pulsante Condividi (quadrato con la freccia in su).
+  c. "Aggiungi alla schermata Home" > "Aggiungi".
+  d. Sulla Home compare l'icona "Tavole": si apre a tutto schermo come un'app.
+
+  Prima di tutto, nell'app File dell'iPad: Sfoglia > ... (in alto) > Modifica
+  e attiva "Drive", così Google Drive compare nel selettore dei file.
+  Consiglio: sulla cartella Database_Pureref_iori tieni premuto >
+  "Rendi disponibile offline" (se l'opzione c'è), così i file sono sempre pronti.
+
+
+3) USO
+------
+  Apri .pur   scegli una tavola da Google Drive > Digitali > Database_Pureref_iori
+  Aggiorna    riscegli lo stesso file: si ricarica SOLO se ha una data più recente
+  Recenti     le tavole già aperte, anche offline; ↻ aggiorna, ✕ toglie dall'elenco
+  Gesti       un dito sposta · due dita zoom · doppio tocco su un'immagine la ingrandisce
+              doppio tocco sul vuoto torna alla vista intera · tocco singolo mostra la fonte
+
+  Funziona con i file di PureRef 2.x (testato con la 2.1.3).
+
+
+4) SE AGGIORNI L'APP
+--------------------
+  Ricarica i file nuovi su GitHub (stessi nomi) e in sw.js cambia
+  VERSION, per esempio da 'tavole-v1' a 'tavole-v2'.
+  Sull'iPad chiudi e riapri l'app due volte per vedere la nuova versione.
+  Le tavole nei Recenti non si perdono.
+
+  Nota: se cancelli i dati del sito da Safari (Impostazioni > Safari >
+  Avanzate > Dati dei siti web) i Recenti si svuotano; i file su Drive
+  restano dove sono, basta riaprirli.

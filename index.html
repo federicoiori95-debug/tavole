@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tavole PureRef</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tavole">
+<meta name="theme-color" content="#1d1e21">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: tela infinita a tutto schermo, barra flottante in alto (tavola + apri/recenti), info al tocco in basso. Look scuro fisso, come PureRef. */
+:root {
+  --canvas: #1d1e21;
+  --chip: rgba(38, 40, 45, 0.88);
+  --chip-line: rgba(255, 255, 255, 0.08);
+  --menu: #2a2c31;
+  --ink: #e9e7e2;
+  --ink-dim: #9a9ca3;
+  --accent: #ffd64d;   /* il giallo delle note di PureRef */
+  --ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--canvas); color: var(--ink);
+  font-family: var(--ui); overflow: hidden;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+#stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+#stage.dragging { cursor: grabbing; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.item { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+.item img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; pointer-events: none; -webkit-user-drag: none; }
+.hit { position: absolute; }
+.note { position: absolute; white-space: pre; line-height: 1.2; font-family: Arial, var(--ui); pointer-events: none; }
+.item svg { position: absolute; overflow: visible; left: 0; top: 0; pointer-events: none; }
+.group-frame { position: absolute; border-radius: 6px; pointer-events: none; }
+
+.bar {
+  position: fixed; z-index: 5;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  pointer-events: none;
+}
+.chip {
+  pointer-events: auto; display: flex; align-items: center; gap: 10px;
+  background: var(--chip); border: 1px solid var(--chip-line); border-radius: 10px;
+  padding: 7px 8px 7px 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  min-width: 0;
+}
+.title { font-weight: 600; font-size: 15px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.meta { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+button, .filebtn {
+  font: 500 13px var(--ui); color: var(--ink); background: transparent;
+  border: 1px solid var(--chip-line); border-radius: 7px; padding: 6px 10px; cursor: pointer;
+  white-space: nowrap; display: inline-flex; align-items: center;
+}
+.filebtn.primary { background: var(--accent); color: #1d1e21; border-color: var(--accent); font-weight: 600; }
+button:hover, .filebtn:hover { border-color: rgba(255,255,255,0.22); }
+button:focus-visible, .filebtn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+#zoom { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); min-width: 4.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+#recent {
+  position: fixed; z-index: 6;
+  top: calc(58px + env(safe-area-inset-top, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  width: min(340px, calc(100% - 32px));
+  background: var(--menu); border: 1px solid var(--chip-line); border-radius: 10px;
+  padding: 6px; display: grid; gap: 2px; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+}
+#recent .row { display: flex; align-items: center; gap: 6px; }
+#recent .open { flex: 1; min-width: 0; text-align: left; border: 0; padding: 9px 10px; display: grid; gap: 2px; }
+#recent .open:hover { background: rgba(255,255,255,0.05); }
+#recent .open span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#recent .when { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+#recent .del { border: 0; color: var(--ink-dim); padding: 8px 10px; }
+#recent .empty { padding: 10px; color: var(--ink-dim); font-size: 13px; line-height: 1.45; }
+
+#info {
+  position: fixed; z-index: 5;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  max-width: min(560px, calc(100% - 32px));
+  font-size: 13px; color: var(--ink-dim); padding-right: 12px;
+}
+#info a { color: var(--accent); word-break: break-all; text-decoration: none; }
+#info .k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+#recent .ref { border: 0; color: var(--ink-dim); padding: 8px 10px; font-size: 15px; }
+#recent .ref:hover, #recent .del:hover { color: var(--ink); }
+#recent .head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px 4px; }
+#recent .head span { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+#recent .row.current .open span:first-child { color: var(--accent); }
+#toast {
+  position: fixed; z-index: 7; left: 50%; transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  background: var(--menu); border: 1px solid var(--chip-line); border-radius: 10px;
+  padding: 9px 14px; font-size: 13px; max-width: calc(100% - 32px); text-align: center;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
+#msg { position: fixed; inset: 0; display: grid; place-items: center; color: var(--ink-dim); font-size: 14px; padding: 16px; text-align: center; pointer-events: none; }
+@media (max-width: 560px) { .meta, #zoom { display: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="world"></div></div>
+<div id="msg">Carico la tavola…</div>
+
+<div class="bar">
+  <div class="chip">
+    <span class="title" id="title">—</span><span class="meta" id="count"></span>
+    <label class="filebtn primary" for="file">Apri .pur<input id="file" type="file"></label>
+    <button id="refreshBtn" type="button" hidden>Aggiorna</button>
+    <button id="recentBtn" type="button" aria-expanded="false">Recenti</button>
+  </div>
+  <div class="chip">
+    <span id="zoom">100%</span>
+    <button id="fit" type="button">Adatta</button>
+  </div>
+</div>
+<div id="recent" hidden></div>
+<div id="info" class="chip" hidden></div>
+<div id="toast" role="status" hidden></div>
+
+<script src="sql-asm.js"></script>
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const world = document.getElementById('world');
+  const zoomEl = document.getElementById('zoom');
+  const info = document.getElementById('info');
+  const msg = document.getElementById('msg');
+  const recentEl = document.getElementById('recent');
+  const recentBtn = document.getElementById('recentBtn');
+
+  /* ================= lettura del .pur (PureRef 2.x) =================
+     Un .pur di PureRef 2 è un database SQLite i cui primi N byte sono stati
+     spostati in fondo al file e sostituiti da intestazione + miniatura.
+     I valori Qt (QTransform, QPainterPath…) sono QByteArray salvati in colonne
+     TEXT: ogni carattere corrisponde a un byte. */
+
+  const MAGIC = new TextEncoder().encode('SQLite format 3\0');
+  function lastIndexOf(buf, pat) {
+    outer: for (let i = buf.length - pat.length; i >= 0; i--) {
+      for (let j = 0; j < pat.length; j++) if (buf[i + j] !== pat[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
+  function extractDb(u8) {
+    const tail = lastIndexOf(u8, MAGIC);
+    if (tail < 0) throw new Error('Questo file non sembra un .pur di PureRef 2. I file della versione 1.x hanno un formato diverso: aprilo e risalvalo con PureRef 2.');
+    const n = u8.length - tail;
+    const db = new Uint8Array(tail);
+    db.set(u8.subarray(tail), 0);
+    db.set(u8.subarray(n, tail), n);
+    return db;
+  }
+  function raw(v) {
+    if (v == null) return null;
+    let str = v;
+    if (v instanceof Uint8Array) str = new TextDecoder('utf-8').decode(v);
+    const out = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 0xff;
+    return out;
+  }
+  const dv = b => new DataView(b.buffer, b.byteOffset, b.byteLength);
+  function qtransform(v) {
+    const b = raw(v);
+    if (!b || b.length < 77) return [1, 0, 0, 1, 0, 0];
+    const d = dv(b), m = [];
+    for (let i = 0; i < 9; i++) m.push(d.getFloat64(5 + i * 8));
+    return [m[0], m[1], m[3], m[4], m[6], m[7]];
+  }
+  function findAscii(b, s) { return lastIndexOf(b, new TextEncoder().encode(s)); }
+  function readPath(b, off) {
+    const d = dv(b), n = d.getUint32(off); off += 4;
+    const els = [];
+    for (let i = 0; i < n; i++, off += 20) els.push([d.getInt32(off), d.getFloat64(off + 4), d.getFloat64(off + 12)]);
+    return [els, off + 8];
+  }
+  function cropOf(v) {
+    const b = raw(v); if (!b) return null;
+    const i = findAscii(b, 'QPainterPath'); if (i < 0) return null;
+    const [els] = readPath(b, i + 13);
+    if (!els.length) return null;
+    const xs = els.map(e => e[1]), ys = els.map(e => e[2]);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return { poly: els.map(e => [e[1], e[2]]), rect: [x0, y0, Math.max(...xs) - x0, Math.max(...ys) - y0] };
+  }
+  function svgPath(els) {
+    const d = [];
+    for (let i = 0; i < els.length; i++) {
+      const [t, x, y] = els[i];
+      if (t === 0) d.push(`M${x} ${y}`);
+      else if (t === 1) d.push(`L${x} ${y}`);
+      else if (t === 2 && i + 2 < els.length) { d.push(`C${x} ${y} ${els[i+1][1]} ${els[i+1][2]} ${els[i+2][1]} ${els[i+2][2]}`); i += 2; }
+    }
+    return d.join(' ');
+  }
+  function strokesOf(v) {
+    const b = raw(v), out = []; if (!b) return out;
+    const i = findAscii(b, 'Stroke>'); if (i < 0) return out;
+    const d = dv(b); let off = i + 8;
+    const count = d.getUint32(off); off += 4;
+    try {
+      for (let k = 0; k < count; k++) {
+        const a = d.getUint16(off + 2) >> 8, r = d.getUint16(off + 4) >> 8, g = d.getUint16(off + 6) >> 8, bl = d.getUint16(off + 8) >> 8;
+        const width = d.getFloat64(off + 12); off += 20;
+        const [els, o2] = readPath(b, off); off = o2 + 20;
+        out.push({ color: `rgba(${r},${g},${bl},${(a / 255).toFixed(3)})`, width, d: svgPath(els) });
+      }
+    } catch (e) { /* stroke troncato: tengo quelli letti */ }
+    return out;
+  }
+  function noteOf(html) {
+    html = html || '';
+    const color = (html.match(/color:(#[0-9a-fA-F]{6})/) || [])[1] || null;
+    const size = +((html.match(/font-size:(\d+)px/) || [])[1] || 22);
+    const doc = new DOMParser().parseFromString(html.replace(/<\/p>/g, '\n</p>').replace(/<br\s*\/?>/g, '\n'), 'text/html');
+    return { text: (doc.body.textContent || '').replace(/^\n+|\n+$/g, ''), color, size };
+  }
+  function colorOf(v) {
+    if (!v || !v.length) return null;
+    if (v instanceof Uint8Array) { const s = new TextDecoder().decode(v); if (s[0] === '#') return s; }
+    if (typeof v === 'string' && v[0] === '#') return v;
+    const b = raw(v);
+    if (b && b.length >= 11) {
+      const d = dv(b), o = b.length - 10;
+      return `rgba(${d.getUint16(o + 2) >> 8},${d.getUint16(o + 4) >> 8},${d.getUint16(o + 6) >> 8},${((d.getUint16(o) >> 8) / 255).toFixed(3)})`;
+    }
+    return null;
+  }
+
+  let SQLp = null;
+  function sql() {
+    if (!SQLp) SQLp = typeof initSqlJs === 'function' ? initSqlJs() : Promise.reject(new Error('Il motore SQLite non si è caricato. Controlla la connessione e riapri la pagina.'));
+    return SQLp;
+  }
+  let liveUrls = [];
+  async function parsePur(buf, name) {
+    const SQL = await sql();
+    const db = new SQL.Database(extractDb(new Uint8Array(buf)));
+    const rows = q => { const r = db.exec(q)[0]; return r ? r.values.map(v => Object.fromEntries(r.columns.map((c, i) => [c, v[i]]))) : []; };
+    const has = t => rows(`select name from sqlite_master where type='table' and name='${t}'`).length > 0;
+    const byId = (t, cols) => has(t) ? new Map(rows(`select ${cols} from ${t}`).map(r => [r.id, r])) : new Map();
+    // i campi Qt contengono byte nulli: vanno letti come BLOB, altrimenti sql.js tronca la stringa
+    const B = c => `cast(${c} as blob) as ${c}`;
+
+    liveUrls.forEach(URL.revokeObjectURL); liveUrls = [];
+    const images = new Map();
+    for (const r of rows('select id, format, origin, source, width, height, data from images')) {
+      const fmt = String(r.format || 'png').toLowerCase();
+      const url = URL.createObjectURL(new Blob([r.data], { type: fmt.startsWith('jp') ? 'image/jpeg' : 'image/' + fmt }));
+      liveUrls.push(url);
+      images.set(r.id, { file: url, w: r.width, h: r.height, source: r.origin || r.source });
+    }
+    const imgs = byId('items_images', `id, image, ${B('image_transform')}, ${B('image_bounds')}`);
+    const notes = byId('items_notes', `id, text, ${B('background_color')}`);
+    const draws = byId('items_drawings', `id, ${B('strokes')}`);
+    const groups = byId('items_groups', `id, ${B('background_color')}`);
+    const items = rows(`select id, parent, z, opacity, ${B('transform')} from items order by z`).map(r => {
+      const it = { id: r.id, parent: r.parent, z: r.z, opacity: r.opacity ?? 1, matrix: qtransform(r.transform) };
+      if (imgs.has(r.id)) {
+        const ii = imgs.get(r.id);
+        Object.assign(it, { type: 'image', image: images.get(ii.image), imageMatrix: qtransform(ii.image_transform), crop: cropOf(ii.image_bounds) });
+      } else if (notes.has(r.id)) {
+        const n = notes.get(r.id);
+        Object.assign(it, { type: 'note', ...noteOf(n.text), background: colorOf(n.background_color) });
+      } else if (draws.has(r.id)) {
+        Object.assign(it, { type: 'drawing', strokes: strokesOf(draws.get(r.id).strokes) });
+      } else if (groups.has(r.id)) {
+        Object.assign(it, { type: 'group', background: colorOf(groups.get(r.id).background_color) });
+      } else it.type = 'unknown';
+      return it;
+    });
+    db.close();
+    return { title: name.replace(/\.pur$/i, ''), items };
+  }
+
+  /* ================= tavole recenti (solo su questo dispositivo) ================= */
+  const DB_NAME = 'pureref-viewer', STORE = 'boards';
+  function idb() {
+    return new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open(DB_NAME, 1);
+        r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'name' });
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      } catch (e) { rej(e); }
+    });
+  }
+  async function store(mode, fn) {
+    const d = await idb();
+    return new Promise((res, rej) => {
+      const tx = d.transaction(STORE, mode), st = tx.objectStore(STORE);
+      const req = fn(st);
+      tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error);
+    });
+  }
+  const saveRecent = (name, buf, modified) => store('readwrite', st => st.put({ name, buf, at: Date.now(), modified: modified || null })).catch(() => {});
+  const listRecent = () => store('readonly', st => st.getAll()).then(a => (a || []).sort((x, y) => y.at - x.at)).catch(() => []);
+  const getRecent = name => store('readonly', st => st.get(name)).catch(() => null);
+  const delRecent = name => store('readwrite', st => st.delete(name)).catch(() => {});
+  const fmtDate = t => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  async function renderRecent() {
+    const list = await listRecent();
+    recentEl.replaceChildren();
+    if (!list.length) {
+      const p = document.createElement('div'); p.className = 'empty';
+      p.textContent = 'Nessuna tavola aperta su questo dispositivo. Tocca "Apri .pur" e scegli il file da Google Drive nell\'app File.';
+      recentEl.appendChild(p); return;
+    }
+    const head = document.createElement('div'); head.className = 'head';
+    const hl = document.createElement('span'); hl.textContent = `Tavole recenti · ${list.length}`;
+    head.appendChild(hl); recentEl.appendChild(head);
+    for (const r of list) {
+      const row = document.createElement('div'); row.className = 'row' + (r.name === current ? ' current' : '');
+      const b = document.createElement('button'); b.className = 'open'; b.type = 'button';
+      const t = document.createElement('span'); t.textContent = r.name.replace(/\.pur$/i, '');
+      const w = document.createElement('span'); w.className = 'when';
+      w.textContent = (r.modified ? 'salvata ' + fmtDate(r.modified) : 'caricata ' + fmtDate(r.at)) + ' · ' + (r.buf.byteLength / 1048576).toFixed(1) + ' MB';
+      b.append(t, w);
+      b.addEventListener('click', () => { toggleRecent(false); openBuffer(r.buf, r.name, false); });
+      const u = document.createElement('button'); u.className = 'ref'; u.type = 'button'; u.textContent = '↻';
+      u.setAttribute('aria-label', 'Aggiorna ' + r.name + ' dal file');
+      u.title = 'Aggiorna dal file';
+      u.addEventListener('click', () => { toggleRecent(false); askRefresh(r.name); });
+      const x = document.createElement('button'); x.className = 'del'; x.type = 'button'; x.textContent = '✕';
+      x.setAttribute('aria-label', 'Togli ' + r.name + ' dai recenti');
+      x.addEventListener('click', async () => { await delRecent(r.name); renderRecent(); });
+      row.append(b, u, x); recentEl.appendChild(row);
+    }
+  }
+  function toggleRecent(show) {
+    show = show ?? recentEl.hidden;
+    recentEl.hidden = !show; recentBtn.setAttribute('aria-expanded', String(show));
+    if (show) renderRecent();
+  }
+  recentBtn.addEventListener('click', () => toggleRecent());
+
+  let current = null, refreshTarget = null, toastTimer = null;
+  const fileInput = document.getElementById('file');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const toastEl = document.getElementById('toast');
+  function toast(text) {
+    toastEl.textContent = text; toastEl.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3500);
+  }
+
+  async function openBuffer(buf, name, remember = true, modified = null) {
+    msg.hidden = false; msg.textContent = 'Leggo ' + name + '…';
+    try {
+      const board = await parsePur(buf, name);
+      build(board);
+      current = name; refreshBtn.hidden = false;
+      if (remember) saveRecent(name, buf, modified);
+      try { localStorage.setItem('pureref-last', name); } catch (e) {}
+      return true;
+    } catch (e) {
+      msg.hidden = false; msg.textContent = e.message || 'Non riesco a leggere questo file.';
+      return false;
+    }
+  }
+
+  // "Aggiorna": il browser non può rileggere da solo un file dell'app File,
+  // quindi riapre il selettore e sostituisce la copia salvata di quella tavola.
+  function askRefresh(name) {
+    refreshTarget = name;
+    toast('Scegli di nuovo ' + name.replace(/\.pur$/i, '') + ' da Google Drive');
+    fileInput.click();
+  }
+  refreshBtn.addEventListener('click', () => current && askRefresh(current));
+
+  fileInput.addEventListener('change', async e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = '';
+    const target = refreshTarget; refreshTarget = null;
+    if (!f) return;
+    const label = f.name.replace(/\.pur$/i, '');
+    // stessa tavola già salvata: si aggiorna solo se il file ha una data più recente
+    const old = await getRecent(f.name);
+    const newer = !old || !old.modified || f.lastModified > old.modified;
+    if (!newer) {
+      if (current === f.name) toast(label + ' è già aggiornata (salvata ' + fmtDate(old.modified) + ')');
+      else if (await openBuffer(old.buf, old.name, false)) toast(label + ' è già aggiornata: aperta la copia salvata');
+      return;
+    }
+    const buf = await f.arrayBuffer();
+    if (target && f.name !== target) {
+      if (await openBuffer(buf, f.name, true, f.lastModified)) toast('Hai scelto ' + label + ': aperta come tavola a parte');
+      return;
+    }
+    if (await openBuffer(buf, f.name, true, f.lastModified) && old) {
+      toast('Aggiornata alla versione salvata ' + fmtDate(f.lastModified));
+    }
+  });
+  // trascina un .pur sulla pagina (desktop)
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', async e => {
+    e.preventDefault();
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) openBuffer(await f.arrayBuffer(), f.name, true, f.lastModified);
+  });
+
+  /* ================= disegno della tavola ================= */
+  let s = 1, tx = 0, ty = 0, bounds = null, anim = null;
+  let itemsById = new Map();
+
+  function apply() {
+    world.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+    zoomEl.textContent = Math.round(s * 100) + '%';
+  }
+  const mul = (m, n) => [
+    n[0]*m[0] + n[1]*m[2],  n[0]*m[1] + n[1]*m[3],
+    n[2]*m[0] + n[3]*m[2],  n[2]*m[1] + n[3]*m[3],
+    n[4]*m[0] + n[5]*m[2] + m[4],  n[4]*m[1] + n[5]*m[3] + m[5]
+  ];
+  const pt = (m, x, y) => [x*m[0] + y*m[2] + m[4], x*m[1] + y*m[3] + m[5]];
+  const css = m => `matrix(${m.join(',')})`;
+  function sceneMatrix(it) {
+    let m = it.matrix, p = itemsById.get(it.parent), guard = 0;
+    while (p && guard++ < 64) { m = mul(p.matrix, m); p = itemsById.get(p.parent); }
+    return m;
+  }
+  function localRect(it) {
+    if (it.type === 'image') {
+      if (it.crop) return it.crop.rect;
+      const im = it.imageMatrix || [1,0,0,1,0,0];
+      return [im[4], im[5], it.image.w, it.image.h];
+    }
+    if (it.type === 'note') {
+      const lines = it.text.split('\n');
+      return [0, 0, Math.max(...lines.map(l => l.length), 1) * it.size * 0.6, it.size * 1.2 * lines.length];
+    }
+    return null;
+  }
+  function sceneBox(it) {
+    const r = localRect(it); if (!r) return null;
+    const m = sceneMatrix(it);
+    const ps = [pt(m, r[0], r[1]), pt(m, r[0]+r[2], r[1]), pt(m, r[0], r[1]+r[3]), pt(m, r[0]+r[2], r[1]+r[3])];
+    const xs = ps.map(p => p[0]), ys = ps.map(p => p[1]);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  }
+
+  function build(board) {
+    world.replaceChildren(); info.hidden = true;
+    itemsById = new Map(board.items.map(it => [it.id, it]));
+    document.getElementById('title').textContent = board.title || 'Tavola';
+    const nImg = board.items.filter(i => i.type === 'image').length;
+    document.getElementById('count').textContent = `${nImg} immagini`;
+
+    const sorted = [...board.items].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    const groupBoxes = new Map();
+
+    for (const it of sorted) {
+      if (it.type === 'group' || it.type === 'unknown') continue;
+      const el = document.createElement('div');
+      el.className = 'item ' + it.type;
+      el.style.transform = css(sceneMatrix(it));
+      if (it.opacity != null && it.opacity < 1) el.style.opacity = it.opacity;
+
+      if (it.type === 'image' && it.image) {
+        const clip = document.createElement('div');
+        clip.className = 'hit';
+        if (it.crop && it.crop.poly) clip.style.clipPath = 'polygon(' + it.crop.poly.map(p => `${p[0]}px ${p[1]}px`).join(',') + ')';
+        const img = new Image();
+        img.decoding = 'async'; img.src = it.image.file;
+        img.width = it.image.w; img.height = it.image.h;
+        img.style.width = it.image.w + 'px'; img.style.height = it.image.h + 'px';
+        img.style.transform = css(it.imageMatrix || [1,0,0,1,0,0]);
+        clip.appendChild(img);
+        const r = localRect(it);
+        const hit = document.createElement('div');
+        hit.className = 'hit';
+        Object.assign(hit.style, { left: r[0]+'px', top: r[1]+'px', width: r[2]+'px', height: r[3]+'px' });
+        hit.dataset.id = it.id;
+        el.append(clip, hit);
+      } else if (it.type === 'note') {
+        const n = document.createElement('div');
+        n.className = 'note'; n.textContent = it.text;
+        n.style.fontSize = it.size + 'px'; n.style.color = it.color || '#ffffff';
+        if (it.background) { n.style.background = it.background; n.style.padding = '4px 6px'; }
+        el.appendChild(n);
+      } else if (it.type === 'drawing') {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', '1'); svg.setAttribute('height', '1');
+        for (const st of it.strokes || []) {
+          const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          p.setAttribute('d', st.d); p.setAttribute('fill', 'none');
+          p.setAttribute('stroke', st.color); p.setAttribute('stroke-width', st.width);
+          p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
+          svg.appendChild(p);
+        }
+        el.appendChild(svg);
+      }
+      world.appendChild(el);
+
+      const b = sceneBox(it);
+      if (b) {
+        bx0 = Math.min(bx0, b[0]); by0 = Math.min(by0, b[1]);
+        bx1 = Math.max(bx1, b[2]); by1 = Math.max(by1, b[3]);
+        let p = itemsById.get(it.parent), guard = 0;
+        while (p && guard++ < 64) {
+          const g = groupBoxes.get(p.id) || [Infinity, Infinity, -Infinity, -Infinity];
+          groupBoxes.set(p.id, [Math.min(g[0], b[0]), Math.min(g[1], b[1]), Math.max(g[2], b[2]), Math.max(g[3], b[3])]);
+          p = itemsById.get(p.parent);
+        }
+      }
+    }
+    for (const [gid, g] of groupBoxes) {
+      const grp = itemsById.get(gid), pad = 24;
+      const f = document.createElement('div');
+      f.className = 'group-frame';
+      Object.assign(f.style, {
+        left: (g[0]-pad)+'px', top: (g[1]-pad)+'px',
+        width: (g[2]-g[0]+2*pad)+'px', height: (g[3]-g[1]+2*pad)+'px',
+        background: grp.background || 'rgba(255,255,255,0.035)',
+        border: '1px solid rgba(255,255,255,0.08)'
+      });
+      world.prepend(f);
+    }
+    bounds = isFinite(bx0) ? [bx0, by0, bx1, by1] : [0, 0, 1000, 1000];
+    msg.hidden = true;
+    fitTo(bounds, false);
+  }
+
+  function fitTo(b, animate = true, margin = 0.06) {
+    if (!b) return;
+    const W = stage.clientWidth, H = stage.clientHeight, topPad = 56;
+    const w = Math.max(1, b[2]-b[0]), h = Math.max(1, b[3]-b[1]);
+    const ns = Math.min(W / (w * (1 + 2*margin)), (H - topPad) / (h * (1 + 2*margin)));
+    const ntx = W/2 - (b[0] + w/2) * ns;
+    const nty = topPad + (H - topPad)/2 - (b[1] + h/2) * ns;
+    if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { s = ns; tx = ntx; ty = nty; apply(); return; }
+    const s0 = s, tx0 = tx, ty0 = ty, t0 = performance.now(), D = 320;
+    cancelAnimationFrame(anim);
+    const step = now => {
+      const k = Math.min(1, (now - t0) / D), e = 1 - Math.pow(1 - k, 3);
+      s = s0 + (ns - s0) * e; tx = tx0 + (ntx - tx0) * e; ty = ty0 + (nty - ty0) * e; apply();
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+  function zoomAt(f, cx, cy) {
+    const ns = Math.max(0.02, Math.min(40, s * f)); f = ns / s;
+    tx = cx - (cx - tx) * f; ty = cy - (cy - ty) * f; s = ns; apply();
+  }
+
+  /* ================= gesti ================= */
+  const pointers = new Map();
+  let pinch = null, moved = false, lastTap = 0, lastTapId = null;
+  stage.addEventListener('pointerdown', e => {
+    cancelAnimationFrame(anim);
+    if (!recentEl.hidden) toggleRecent(false);
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+    moved = false;
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.hypot(a.x-b.x, a.y-b.y), cx: (a.x+b.x)/2, cy: (a.y+b.y)/2 };
+    }
+    stage.classList.add('dragging');
+  });
+  stage.addEventListener('pointermove', e => {
+    const p = pointers.get(e.pointerId); if (!p) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (Math.hypot(p.x - p.x0, p.y - p.y0) > 6) moved = true;
+    if (pointers.size === 1) { tx += dx; ty += dy; apply(); }
+    else if (pointers.size === 2 && pinch) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x-b.x, a.y-b.y), cx = (a.x+b.x)/2, cy = (a.y+b.y)/2;
+      tx += cx - pinch.cx; ty += cy - pinch.cy;
+      zoomAt(d / pinch.d, cx, cy);
+      pinch = { d, cx, cy };
+    }
+  });
+  function end(e) {
+    const p = pointers.get(e.pointerId);
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) stage.classList.remove('dragging');
+    if (!p || moved || e.type === 'pointercancel') return;
+    const hit = document.elementsFromPoint(e.clientX, e.clientY).find(el => el.dataset && el.dataset.id);
+    const id = hit ? hit.dataset.id : null;
+    const now = performance.now();
+    if (now - lastTap < 320 && id === lastTapId) {
+      lastTap = 0;
+      if (id) fitTo(sceneBox(itemsById.get(+id)), true, 0.03); else fitTo(bounds);
+      return;
+    }
+    lastTap = now; lastTapId = id;
+    showInfo(id ? itemsById.get(+id) : null);
+  }
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    else if (e.deltaMode === 0 && Math.abs(e.deltaY) < 40 && !Number.isInteger(e.deltaY)) { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+    else zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+  }, { passive: false });
+  let gs = 1;
+  stage.addEventListener('gesturestart', e => { e.preventDefault(); gs = 1; });
+  stage.addEventListener('gesturechange', e => { e.preventDefault(); zoomAt(e.scale / gs, e.clientX, e.clientY); gs = e.scale; });
+  document.getElementById('fit').addEventListener('click', () => fitTo(bounds));
+  window.addEventListener('resize', () => bounds && fitTo(bounds, false));
+  window.addEventListener('keydown', e => {
+    if (e.key === '0' || e.key === 'Home') fitTo(bounds);
+    if (e.key === '+' || e.key === '=') zoomAt(1.25, innerWidth/2, innerHeight/2);
+    if (e.key === '-') zoomAt(0.8, innerWidth/2, innerHeight/2);
+    if (e.key === 'Escape') toggleRecent(false);
+  });
+
+  function showInfo(it) {
+    if (!it || !it.image) { info.hidden = true; return; }
+    info.replaceChildren();
+    const box = document.createElement('div');
+    box.style.display = 'grid'; box.style.gap = '3px'; box.style.minWidth = '0';
+    const k = document.createElement('span'); k.className = 'k';
+    k.textContent = `${it.image.w} × ${it.image.h} px · doppio tocco per ingrandire`;
+    box.appendChild(k);
+    const src = it.image.source;
+    if (src && /^https?:/.test(src)) {
+      const a = document.createElement('a'); a.href = src; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = src.length > 90 ? src.slice(0, 87) + '…' : src;
+      box.appendChild(a);
+    } else {
+      const t = document.createElement('span');
+      t.textContent = src ? src.split(/[\\/]/).pop() : 'Immagine incollata, senza sorgente';
+      box.appendChild(t);
+    }
+    info.appendChild(box); info.hidden = false;
+  }
+
+  /* ================= avvio: ultima tavola aperta, altrimenti l'esempio ================= */
+  (async () => {
+    let last = null;
+    try { last = localStorage.getItem('pureref-last'); } catch (e) {}
+    const rec = last ? await getRecent(last) : null;
+    if (rec) return openBuffer(rec.buf, rec.name, false);
+    msg.textContent = 'Tocca "Apri .pur" e scegli una tavola da Google Drive.';
+  })();
+})();
+</script>
+
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+</body>
+</html>
